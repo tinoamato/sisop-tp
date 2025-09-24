@@ -1,0 +1,5 @@
+tp1
+*.o
+*.out
+*.log
+*.csv
