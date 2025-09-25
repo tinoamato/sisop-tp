@@ -1,7 +1,6 @@
 TP1 – Sistemas Operativos (Ejercicio 1)
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Descripción
 
 Este programa implementa un sistema coordinador + generadores que producen registros y los escriben en un archivo CSV utilizando memoria compartida y semáforos POSIX.
@@ -11,8 +10,7 @@ Este programa implementa un sistema coordinador + generadores que producen regis
 
 El enunciado solicita además validación con AWK y monitoreo en Linux.
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Compilación
 
 En la raíz del proyecto:
@@ -25,15 +23,14 @@ Para limpiar compilación:
 
 make clean
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Ejecución
 
 Ejemplo recomendado con 3 generadores y 500 registros:
 
 ./tp1 -g 3 -n 500
 
-Con un retardo de 0,5 segundos por registro, este caso dura varios minutos, lo que permite observar procesos concurrentes con herramientas de monitoreo.
+Con un retardo de 0,5 segundos por registro, este caso dura varios minutos y permite observar procesos concurrentes con herramientas de monitoreo.
 
 Salida esperada (resumida):
 
@@ -52,8 +49,7 @@ ID,Campo1,Campo2
 …
 500,48,818
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Validación con AWK
 
 El script scripts/validate.awk verifica que el CSV tenga IDs correlativos y sin duplicados:
@@ -64,8 +60,7 @@ Salida esperada:
 
 Validación OK: IDs correlativos y sin duplicados.
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Pruebas automatizadas
 
 Se incluye el script scripts/run_tests.sh para correr múltiples combinaciones:
@@ -77,8 +72,7 @@ Si todo pasa, muestra:
 
 ✔️ Todos los tests pasaron
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Robustez
 	•	Ctrl+C: el coordinador limpia recursos (shm_unlink, sem_unlink) y notifica shutdown a los hijos.
 	•	Caída de un generador: el resto continúa; el coordinador puede terminar con menos registros que -n, lo cual se loguea como advertencia.
@@ -87,8 +81,7 @@ Robustez
 	•	En Mac, se detecta si getppid()==1 (padre muerto) y el hijo sale.
 	•	SIGKILL (-9): no puede interceptarse, por lo que puede quedar SHM/sems colgados. Se incluye un script de limpieza.
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Limpieza manual
 
 En caso de recursos colgados (tras kill -9):
@@ -97,8 +90,7 @@ En caso de recursos colgados (tras kill -9):
 
 Este elimina semáforos POSIX y SHM residuales.
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Monitoreo (para el informe)
 
 Estas pruebas deben documentarse en Linux (no se ven igual en macOS):
@@ -110,11 +102,13 @@ ls /dev/shm
 	3.	Estadísticas de concurrencia
 vmstat 1 5
 
-Usar como caso base: ./tp1 -g 3 -n 500
+Usar como caso base:
+
+./tp1 -g 3 -n 500
+
 De esta manera el programa corre varios minutos y se pueden obtener capturas de procesos concurrentes.
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
-
+============================================================
 Informe / Documentación
 
 Para completar la entrega, documentar:
@@ -124,7 +118,7 @@ Para completar la entrega, documentar:
 	•	Pruebas de robustez (matar hijos/padre, Ctrl+C).
 	•	Conclusiones sobre el comportamiento.
 
-⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻⸻
+============================================================
 Autores
 	•	Grupo 04
 	•	Materia: Sistemas Operativos - 3649
