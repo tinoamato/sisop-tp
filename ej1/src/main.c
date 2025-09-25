@@ -43,6 +43,12 @@ void run_generator(int id) {
     while (!kid_terminate) {
         if (g_shm && g_shm->shutdown) break;
 
+        // Detectar si el padre murió (en Mac/Linux)
+        if (getppid() == 1) {
+            fprintf(stderr, "[GEN %d] Padre muerto, salgo.\n", id);
+            break;
+        }
+
         // Pedir lote de IDs (máx 10) bajo mutex
         int start = 0, count = 0;
         if (sem_wait_cancellable(g_sem_id_mutex, 500) == -1) {
@@ -63,6 +69,7 @@ void run_generator(int id) {
         // Publicar cada registro del lote
         for (int i = 0; i < count && !kid_terminate; i++) {
             if (g_shm->shutdown) break;
+            if (getppid() == 1) break;
 
             Registro r;
             r.id = (uint64_t)(start + i);
@@ -99,7 +106,7 @@ void run_generator(int id) {
             sem_post(g_sem_full);
 
             /* 👇 Delay para ver procesos en vivo */
-            usleep(300000); // 0.3 segundos
+            usleep(500000); // 0.5 segundos
         }
     }
 
@@ -159,6 +166,13 @@ void run_coordinator(void) {
 
     ipc_notify_shutdown();
     printf("[COORD] Terminé. Total escritos: %d\n", processed);
+
+    // Log si faltan registros
+    if (processed < g_total) {
+        fprintf(stderr,
+            "[COORD] Advertencia: solo se escribieron %d de %d registros (posible caída de hijos).\n",
+            processed, g_total);
+    }
 }
 
 /* ========== MAIN ========== */
