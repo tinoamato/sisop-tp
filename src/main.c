@@ -4,58 +4,102 @@
 #include <getopt.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <errno.h>
+#include <time.h>
 
 #include "ipc.h"
+
+#ifdef __linux__
+#include <sys/prctl.h>   // PR_SET_PDEATHSIG
+#endif
 
 static int g_generadores = 0;
 static int g_total = 0;
 
-static void usage(const char *progname) {
-    printf("Uso: %s -g <generadores> -n <total_registros>\n", progname);
-    exit(EXIT_FAILURE);
-}
-
+/* ========== Señales ========== */
 static void on_sigint(int sig) {
     (void)sig;
-    fprintf(stderr, "\n[MAIN] SIGINT recibido. Limpiando recursos...\n");
+    fprintf(stderr, "\n[MAIN] SIGINT recibido. Notificando shutdown y limpiando recursos...\n");
+    ipc_notify_shutdown();
     ipc_cleanup();
     _exit(130);
 }
 
-// -------------------- GENERADOR --------------------
+/* ========== GENERADOR ========== */
+
+static volatile sig_atomic_t kid_terminate = 0;
+static void kid_sigterm(int s){ (void)s; kid_terminate = 1; }
+
 void run_generator(int id) {
-    srand(getpid()); // semilla aleatoria distinta por proceso
+#ifdef __linux__
+    // Si el padre muere, el kernel nos manda SIGTERM
+    prctl(PR_SET_PDEATHSIG, SIGTERM);
+#endif
+    signal(SIGTERM, kid_sigterm);
+    signal(SIGINT,  kid_sigterm);
 
-    while (1) {
-        // Pedir lote de 10 IDs
-        int start, count;
+    srand(getpid()); // semilla distinta
 
-        sem_wait(g_sem_id_mutex);
-        if (g_shm->remaining == 0) {
-            sem_post(g_sem_id_mutex);
-            break; // ya no hay más trabajo
+    while (!kid_terminate) {
+        if (g_shm && g_shm->shutdown) break;
+
+        // Pedir lote de IDs (máx 10) bajo mutex
+        int start = 0, count = 0;
+        if (sem_wait_cancellable(g_sem_id_mutex, 500) == -1) {
+            if (errno == ETIMEDOUT) continue;
+            perror("[GEN] sem_wait id_mutex");
+            break;
         }
-        start = g_shm->next_id;
-        count = (g_shm->remaining >= 10) ? 10 : g_shm->remaining;
-        g_shm->next_id += count;
-        g_shm->remaining -= count;
+        if (g_shm->remaining == 0 || g_shm->shutdown) {
+            sem_post(g_sem_id_mutex);
+            break;
+        }
+        start = (int)g_shm->next_id;
+        count = (g_shm->remaining >= 10) ? 10 : (int)g_shm->remaining;
+        g_shm->next_id += (uint64_t)count;
+        g_shm->remaining -= (uint64_t)count;
         sem_post(g_sem_id_mutex);
 
-        // Generar registros y publicarlos de a uno
-        for (int i = 0; i < count; i++) {
-            Registro r;
-            r.id = start + i;
-            r.campo1 = rand() % 100;   // valor aleatorio
-            r.campo2 = rand() % 1000;  // valor aleatorio
+        // Publicar cada registro del lote
+        for (int i = 0; i < count && !kid_terminate; i++) {
+            if (g_shm->shutdown) break;
 
-            sem_wait(g_sem_empty);
-            sem_wait(g_sem_buf_mutex);
+            Registro r;
+            r.id = (uint64_t)(start + i);
+            r.campo1 = rand() % 100;
+            r.campo2 = rand() % 1000;
+
+            if (sem_wait_cancellable(g_sem_empty, 1000) == -1) {
+                if (errno == ETIMEDOUT) {
+                    if (kid_terminate || (g_shm && g_shm->shutdown)) break;
+                    i--;
+                    continue;
+                } else {
+                    perror("[GEN] sem_wait empty");
+                    break;
+                }
+            }
+
+            if (sem_wait_cancellable(g_sem_buf_mutex, 500) == -1) {
+                if (errno == ETIMEDOUT) {
+                    sem_post(g_sem_empty);
+                    i--;
+                    continue;
+                } else {
+                    perror("[GEN] sem_wait buf_mutex");
+                    sem_post(g_sem_empty);
+                    break;
+                }
+            }
 
             g_shm->buffer[g_shm->tail] = r;
             g_shm->tail = (g_shm->tail + 1) % SLOTS;
 
             sem_post(g_sem_buf_mutex);
             sem_post(g_sem_full);
+
+            /* 👇 Delay para ver procesos en vivo */
+            usleep(300000); // 0.3 segundos
         }
     }
 
@@ -63,20 +107,42 @@ void run_generator(int id) {
     _exit(0);
 }
 
-// -------------------- COORDINADOR --------------------
+/* ========== COORDINADOR ========== */
+
 void run_coordinator(void) {
-    FILE *f = fopen("salida.csv", "a"); // abrir en append
+    FILE *f = fopen("salida.csv", "a");
     if (!f) {
         perror("No se pudo abrir salida.csv");
         return;
     }
 
     int processed = 0;
-    while (1) {
-        if (processed >= g_total) break;
 
-        sem_wait(g_sem_full);
-        sem_wait(g_sem_buf_mutex);
+    while (processed < g_total) {
+        if (g_shm && g_shm->shutdown) break;
+
+        if (sem_wait_cancellable(g_sem_full, 1000) == -1) {
+            if (errno == ETIMEDOUT) {
+                if (g_shm && g_shm->remaining == 0) {
+                    if (g_shm->head == g_shm->tail) break;
+                }
+                continue;
+            } else {
+                perror("[COORD] sem_wait full");
+                break;
+            }
+        }
+
+        if (sem_wait_cancellable(g_sem_buf_mutex, 500) == -1) {
+            if (errno == ETIMEDOUT) {
+                sem_post(g_sem_full);
+                continue;
+            } else {
+                perror("[COORD] sem_wait buf_mutex");
+                sem_post(g_sem_full);
+                break;
+            }
+        }
 
         Registro r = g_shm->buffer[g_shm->head];
         g_shm->head = (g_shm->head + 1) % SLOTS;
@@ -85,17 +151,23 @@ void run_coordinator(void) {
         sem_post(g_sem_empty);
 
         fprintf(f, "%llu,%d,%d\n",
-                (unsigned long long)r.id,
-                r.campo1,
-                r.campo2);
+                (unsigned long long)r.id, r.campo1, r.campo2);
         processed++;
     }
 
     fclose(f);
+
+    ipc_notify_shutdown();
     printf("[COORD] Terminé. Total escritos: %d\n", processed);
 }
 
-// -------------------- MAIN --------------------
+/* ========== MAIN ========== */
+
+static void usage(const char *progname) {
+    printf("Uso: %s -g <generadores> -n <total_registros>\n", progname);
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char *argv[]) {
     int opt;
     while ((opt = getopt(argc, argv, "g:n:")) != -1) {
@@ -105,29 +177,24 @@ int main(int argc, char *argv[]) {
             default: usage(argv[0]);
         }
     }
-
-    if (g_generadores <= 0 || g_total <= 0) {
-        usage(argv[0]);
-    }
+    if (g_generadores <= 0 || g_total <= 0) usage(argv[0]);
 
     signal(SIGINT, on_sigint);
     atexit(ipc_cleanup);
 
-    // CSV inicial con cabecera
     FILE *f = fopen("salida.csv", "w");
     if (!f) { perror("No se pudo abrir salida.csv"); return EXIT_FAILURE; }
     fprintf(f, "ID,Campo1,Campo2\n");
     fclose(f);
 
-    // Inicializar IPC
     if (ipc_init((uint64_t)g_total) != 0) {
         fprintf(stderr, "[MAIN] Error inicializando IPC.\n");
         return EXIT_FAILURE;
     }
 
     printf("[MAIN] Generadores: %d, Total: %d\n", g_generadores, g_total);
+    ipc_print_state();
 
-    // Fork de N generadores
     for (int i = 0; i < g_generadores; i++) {
         pid_t pid = fork();
         if (pid == 0) {
@@ -135,10 +202,8 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Proceso padre → coordinador
     run_coordinator();
 
-    // Esperar hijos
     for (int i = 0; i < g_generadores; i++) {
         wait(NULL);
     }

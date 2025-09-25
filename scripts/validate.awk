@@ -4,7 +4,7 @@ BEGIN {
     ok = 1;
 }
 NR > 1 {
-    id = $1;
+    id = $1 + 0;
     if (id != prev + 1) {
         print "Error: ID " id " no es correlativo después de " prev;
         ok = 0;
