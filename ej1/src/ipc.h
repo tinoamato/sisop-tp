@@ -14,11 +14,12 @@
 // Tamaño del buffer
 #define SLOTS 64
 
-// Registro de ejemplo (ajustalo si querés)
+// Registro de ejemplo
 typedef struct {
-    uint64_t id;
-    int campo1;
-    int campo2;
+    uint64_t id;        // ID correlativo único
+    int sensor_id;      // de qué generador proviene
+    int temperatura;    // 15 a 30
+    int humedad;        // 30 a 99
 } Registro;
 
 typedef struct {

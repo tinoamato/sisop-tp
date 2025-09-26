@@ -32,24 +32,21 @@ static void kid_sigterm(int s){ (void)s; kid_terminate = 1; }
 
 void run_generator(int id) {
 #ifdef __linux__
-    // Si el padre muere, el kernel nos manda SIGTERM
     prctl(PR_SET_PDEATHSIG, SIGTERM);
 #endif
     signal(SIGTERM, kid_sigterm);
     signal(SIGINT,  kid_sigterm);
 
-    srand(getpid()); // semilla distinta
+    srand(getpid());
 
     while (!kid_terminate) {
         if (g_shm && g_shm->shutdown) break;
 
-        // Detectar si el padre murió (en Mac/Linux)
         if (getppid() == 1) {
             fprintf(stderr, "[GEN %d] Padre muerto, salgo.\n", id);
             break;
         }
 
-        // Pedir lote de IDs (máx 10) bajo mutex
         int start = 0, count = 0;
         if (sem_wait_cancellable(g_sem_id_mutex, 500) == -1) {
             if (errno == ETIMEDOUT) continue;
@@ -66,15 +63,15 @@ void run_generator(int id) {
         g_shm->remaining -= (uint64_t)count;
         sem_post(g_sem_id_mutex);
 
-        // Publicar cada registro del lote
         for (int i = 0; i < count && !kid_terminate; i++) {
             if (g_shm->shutdown) break;
             if (getppid() == 1) break;
 
             Registro r;
             r.id = (uint64_t)(start + i);
-            r.campo1 = rand() % 100;
-            r.campo2 = rand() % 1000;
+            r.sensor_id = id;                       // ID del generador
+            r.temperatura = 15 + rand() % 16;       // 15 a 30
+            r.humedad = 30 + rand() % 70;           // 30 a 99
 
             if (sem_wait_cancellable(g_sem_empty, 1000) == -1) {
                 if (errno == ETIMEDOUT) {
@@ -105,7 +102,6 @@ void run_generator(int id) {
             sem_post(g_sem_buf_mutex);
             sem_post(g_sem_full);
 
-            /* 👇 Delay para ver procesos en vivo */
             usleep(500000); // 0.5 segundos
         }
     }
@@ -157,8 +153,8 @@ void run_coordinator(void) {
         sem_post(g_sem_buf_mutex);
         sem_post(g_sem_empty);
 
-        fprintf(f, "%llu,%d,%d\n",
-                (unsigned long long)r.id, r.campo1, r.campo2);
+        fprintf(f, "%llu,%d,%d,%d\n",
+                (unsigned long long)r.id, r.sensor_id, r.temperatura, r.humedad);
         processed++;
     }
 
@@ -167,7 +163,6 @@ void run_coordinator(void) {
     ipc_notify_shutdown();
     printf("[COORD] Terminé. Total escritos: %d\n", processed);
 
-    // Log si faltan registros
     if (processed < g_total) {
         fprintf(stderr,
             "[COORD] Advertencia: solo se escribieron %d de %d registros (posible caída de hijos).\n",
@@ -198,7 +193,7 @@ int main(int argc, char *argv[]) {
 
     FILE *f = fopen("salida.csv", "w");
     if (!f) { perror("No se pudo abrir salida.csv"); return EXIT_FAILURE; }
-    fprintf(f, "ID,Campo1,Campo2\n");
+    fprintf(f, "ID,SensorID,Temperatura,Humedad\n");
     fclose(f);
 
     if (ipc_init((uint64_t)g_total) != 0) {

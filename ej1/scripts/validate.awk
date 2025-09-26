@@ -1,18 +1,22 @@
 BEGIN {
-    FS=","; 
-    prev = 0;
-    ok = 1;
+    FS=","            # separador CSV
+    getline           # saltear cabecera
 }
-NR > 1 {
-    id = $1 + 0;
-    if (id != prev + 1) {
-        print "Error: ID " id " no es correlativo después de " prev;
-        ok = 0;
+{
+    if (NR == 1) next
+    id = $1
+    if (id_seen[id]++) {
+        print "Error: ID duplicado " id
+        exit 1
     }
-    prev = id;
+    max_id = (id > max_id ? id : max_id)
 }
 END {
-    if (ok) {
-        print "Validación OK: IDs correlativos y sin duplicados.";
+    for (i = 1; i <= max_id; i++) {
+        if (!(i in id_seen)) {
+            print "Error: falta ID " i
+            exit 1
+        }
     }
+    print "Validación OK: IDs correlativos y sin duplicados (orden indiferente)."
 }
